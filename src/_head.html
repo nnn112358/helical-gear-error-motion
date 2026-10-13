@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}}</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=M+PLUS+1+Code:wght@400;600;700&family=Zen+Kaku+Gothic+New:wght@500;700&display=swap">
+<style>
+/* {{LAYOUT}} */
+:root {
+  --bg: #EEF0F5; --die: #E1E5EE; --ink: #1B2233; --muted: #586178; --line: #C6CCDA;
+  --ideal: #0B8466; --err: #C2541A; --warn: #D12F4A;
+  --display: "Dela Gothic One", "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", sans-serif;
+  --body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", "Noto Sans JP", sans-serif;
+  --mono: "M PLUS 1 Code", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10141F; --die: #1A2031; --ink: #E8ECF5; --muted: #9AA4BA; --line: #2E3752;
+    --ideal: #3CCB9F; --err: #F08A4B; --warn: #FF6B81;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #10141F; --die: #1A2031; --ink: #E8ECF5; --muted: #9AA4BA; --line: #2E3752;
+  --ideal: #3CCB9F; --err: #F08A4B; --warn: #FF6B81;
+  color-scheme: dark;
+}
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.6; }
+.wrap { max-width: 1840px; margin-inline: auto; padding-inline: 20px; padding-block: 28px 40px; display: flex; flex-direction: column; gap: 22px; }
+.top { display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: center; justify-content: space-between; }
+h1 { font-family: var(--display); font-weight: 400; font-size: clamp(1.4rem, 3.2vw, 2.1rem); line-height: 1.3; margin: 0; text-wrap: balance; }
+.lead { margin: 0; font-size: 0.95rem; color: var(--muted); max-width: 70em; }
+.spec { margin: 6px 0 0; font-size: 0.95rem; color: var(--muted); }
+.spec b.i { color: var(--ideal); } .spec b.e { color: var(--err); }
+.points { margin: 10px 0 0; padding-left: 1.6em; font-size: 1.15rem; font-weight: 700; line-height: 1.55; max-width: 60em; }
+.points li::marker { font-family: var(--mono); color: var(--err); }
+.points em { font-style: normal; color: var(--err); }
+.note { font-size: 0.9rem; color: var(--muted); max-width: 70em; }
+.note summary { cursor: pointer; font-weight: 700; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.controls button { font: 600 0.875rem var(--mono); color: var(--ink); background: transparent; border: 1px solid var(--ink); border-radius: 999px; padding: 8px 16px; cursor: pointer; min-width: 6.5em; }
+.controls button:hover { background: var(--die); }
+.controls button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.chips { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 420px)); justify-content: center; gap: 28px 22px; }
+@media (max-width: 1000px) { .chips { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); } }
+.chip { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.chip-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.chip-name { font-family: var(--display); font-size: 1.7rem; line-height: 1.1; color: var(--ink); }
+.chip-tag { font-weight: 700; font-size: 0.95rem; color: var(--muted); }
+.chip canvas { display: block; width: 100%; max-width: 100%; aspect-ratio: 340 / 520; }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header class="top">
+    <div>
+      <h1>{{H1}}</h1>
+      <p class="spec" id="spec"></p>
+      <ol class="points" id="points"></ol>
+    </div>
+    <div class="controls">
+      <button id="playToggle" type="button" aria-pressed="false">一時停止</button>
+      <button id="speedToggle" type="button">速さ 1×</button>
+      <button id="restart" type="button">最初から</button>
+    </div>
+  </header>
+  <section class="chips" style="--n: {{N}}">
+{{CHIPS}}
+  </section>
+  <details class="note"><summary>前提と計算のしかた</summary><p class="lead" id="lead"></p></details>
+</main>
+<script>
+(function () {
+  'use strict';

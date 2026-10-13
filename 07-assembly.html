@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>組み立ての誤差</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=M+PLUS+1+Code:wght@400;600;700&family=Zen+Kaku+Gothic+New:wght@500;700&display=swap">
+<style>
+/* 同じ歯車 2 枚をかみ合わせる。中心距離が離れるとすき間（バックラッシ）が開くこと、軸が傾くと歯面のすき間がくさび形になり当たりが端に寄ること、傾きの向きで効き方が違うこと、を真値と誤差ありで比べる */
+:root {
+  --bg: #EEF0F5; --die: #E1E5EE; --ink: #1B2233; --muted: #586178; --line: #C6CCDA;
+  --ideal: #0B8466; --err: #C2541A; --warn: #D12F4A;
+  --display: "Dela Gothic One", "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", sans-serif;
+  --body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", "Noto Sans JP", sans-serif;
+  --mono: "M PLUS 1 Code", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10141F; --die: #1A2031; --ink: #E8ECF5; --muted: #9AA4BA; --line: #2E3752;
+    --ideal: #3CCB9F; --err: #F08A4B; --warn: #FF6B81;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #10141F; --die: #1A2031; --ink: #E8ECF5; --muted: #9AA4BA; --line: #2E3752;
+  --ideal: #3CCB9F; --err: #F08A4B; --warn: #FF6B81;
+  color-scheme: dark;
+}
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.6; }
+.wrap { max-width: 1840px; margin-inline: auto; padding-inline: 20px; padding-block: 28px 40px; display: flex; flex-direction: column; gap: 22px; }
+.top { display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: center; justify-content: space-between; }
+h1 { font-family: var(--display); font-weight: 400; font-size: clamp(1.4rem, 3.2vw, 2.1rem); line-height: 1.3; margin: 0; text-wrap: balance; }
+.lead { margin: 0; font-size: 0.95rem; color: var(--muted); max-width: 70em; }
+.spec { margin: 6px 0 0; font-size: 0.95rem; color: var(--muted); }
+.spec b.i { color: var(--ideal); } .spec b.e { color: var(--err); }
+.points { margin: 10px 0 0; padding-left: 1.6em; font-size: 1.15rem; font-weight: 700; line-height: 1.55; max-width: 60em; }
+.points li::marker { font-family: var(--mono); color: var(--err); }
+.points em { font-style: normal; color: var(--err); }
+.note { font-size: 0.9rem; color: var(--muted); max-width: 70em; }
+.note summary { cursor: pointer; font-weight: 700; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.controls button { font: 600 0.875rem var(--mono); color: var(--ink); background: transparent; border: 1px solid var(--ink); border-radius: 999px; padding: 8px 16px; cursor: pointer; min-width: 6.5em; }
+.controls button:hover { background: var(--die); }
+.controls button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.chips { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 420px)); justify-content: center; gap: 28px 22px; }
+@media (max-width: 1000px) { .chips { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); } }
+.chip { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.chip-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.chip-name { font-family: var(--display); font-size: 1.7rem; line-height: 1.1; color: var(--ink); }
+.chip-tag { font-weight: 700; font-size: 0.95rem; color: var(--muted); }
+.chip canvas { display: block; width: 100%; max-width: 100%; aspect-ratio: 340 / 520; }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header class="top">
+    <div>
+      <h1>組み立てたときの誤差</h1>
+      <p class="spec" id="spec"></p>
+      <ol class="points" id="points"></ol>
+    </div>
+    <div class="controls">
+      <button id="playToggle" type="button" aria-pressed="false">一時停止</button>
+      <button id="speedToggle" type="button">速さ 1×</button>
+      <button id="restart" type="button">最初から</button>
+    </div>
+  </header>
+  <section class="chips" style="--n: 3">
+    <div class="chip"><div class="chip-head"><span class="chip-name">中心距離の誤差</span><span class="chip-tag">軸と軸の距離</span></div><canvas id="cv-ca" role="img"></canvas></div>
+    <div class="chip"><div class="chip-head"><span class="chip-name">平行度 fΣδ</span><span class="chip-tag">同じ面内の傾き</span></div><canvas id="cv-pd" role="img"></canvas></div>
+    <div class="chip"><div class="chip-head"><span class="chip-name">平行度 fΣβ</span><span class="chip-tag">ねじれの傾き</span></div><canvas id="cv-pb" role="img"></canvas></div>
+  </section>
+  <details class="note"><summary>前提と計算のしかた</summary><p class="lead" id="lead"></p></details>
+</main>
+<script>
+(function () {
+  'use strict';
+// ---------- 問題 ----------（node でも検算できるよう、ここだけで完結させる）
+var G = {"mn": 2.0, "z": 24, "beta": 20.0, "b": 16.0, "an": 20.0, "mt": 2.128355544951824, "at": 21.17283218516298, "rp": 25.54026653942189, "rb": 23.816175115309466, "ra": 27.54026653942189, "rf": 23.04026653942189, "r_form": 24.127454129194945, "chamfer": 0.5, "flank": [[22.85895, -2.88481], [22.86602, -2.83876], [22.87585, -2.79067], [22.88815, -2.74272], [22.90291, -2.69524], [22.92006, -2.64859], [22.93952, -2.60366], [22.96142, -2.55931], [22.98574, -2.5157], [23.01248, -2.473], [23.04161, -2.43142], [23.07307, -2.39158], [23.10693, -2.35295], [23.14318, -2.31565], [23.18181, -2.27979], [23.22282, -2.24551], [23.2662, -2.21292], [23.31196, -2.18212], [23.36008, -2.15333], [23.41057, -2.12645], [23.46344, -2.10151], [23.51866, -2.07884], [23.57627, -2.05831], [23.63626, -2.03988], [23.69866, -2.02334], [23.7635, -2.00847], [23.83062, -1.9971], [23.90023, -1.98684], [23.97219, -1.97941], [24.0467, -1.97242], [24.12378, -1.96556], [24.20359, -1.95699], [24.28613, -1.9467], [24.37139, -1.93463], [24.45937, -1.92072], [24.55006, -1.90502], [24.64348, -1.88731], [24.73962, -1.86772], [24.83847, -1.846], [24.94003, -1.82225], [25.0443, -1.79632], [25.15128, -1.76811], [25.26095, -1.73769], [25.37332, -1.70478], [25.48838, -1.66945], [25.60611, -1.63168], [25.72653, -1.59115], [25.8496, -1.54799], [25.97532, -1.50213], [26.10369, -1.4533], [26.23468, -1.40156], [26.36829, -1.34686], [26.50449, -1.28899], [26.64327, -1.22788], [26.78461, -1.16354], [26.92849, -1.09585], [27.0749, -1.02454], [27.22379, -0.94972], [27.37515, -0.87131], [27.52896, -0.78901]]};
+if (typeof module !== 'undefined' && !G) G = require('./gear.json');
+var AT = G.at * Math.PI / 180, AN = G.an * Math.PI / 180, BETA = G.beta * Math.PI / 180;
+
+// 誤差の大きさ：JIS B 1702-1:1998（= ISO 1328-1:1995）の 5 級の式に、この歯車の実寸
+// （d = 基準円直径, mn, b）をそのまま入れ、10 級に換算（×√2^(10-5)）した「目安」。
+// 規格は寸法区分の幾何平均と丸めを使うので、表の値とは少し違う。
+var GRADE = 10, QF = Math.pow(2, (GRADE - 5) / 2);
+var d = 2 * G.rp, sd = Math.sqrt(d), sm = Math.sqrt(G.mn), sb = Math.sqrt(G.b);
+var TOL = {
+  fpt: (0.3 * (G.mn + 0.4 * sd) + 4) * QF,       // 単一ピッチ誤差
+  Fp: (0.3 * G.mn + 1.25 * sd + 7) * QF,         // 累積ピッチ誤差
+  Fa: (3.2 * sm + 0.22 * sd + 0.7) * QF,         // 全歯形誤差
+  ffa: (2.5 * sm + 0.17 * sd + 0.5) * QF,        // 歯形形状誤差
+  fHa: (2 * sm + 0.14 * sd + 0.5) * QF,          // 歯形勾配誤差
+  Fb: (0.1 * sd + 0.63 * sb + 4.2) * QF,         // 全歯すじ誤差
+  ffb: (0.07 * sd + 0.45 * sb + 3) * QF,         // 歯すじ形状誤差（= 勾配誤差の式）
+  Fr: 0.8 * (0.3 * G.mn + 1.25 * sd + 7) * QF    // 歯溝の振れ
+};
+TOL.fpb = TOL.fpt * Math.cos(G.at * Math.PI / 180);   // 法線ピッチ誤差（単一ピッチ × cos αt を目安にする）
+var RA = 3.2;                                    // 歯面粗さ：Ra 3.2 µm を想定（歯切りのまま程度）
+
+function rng(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; var t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function range(a) { return Math.max.apply(null, a) - Math.min.apply(null, a); }
+function lsq(x, y) {                              // 最小二乗の直線 → [傾き, 切片]
+  var n = x.length, sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (var i = 0; i < n; i++) { sx += x[i]; sy += y[i]; sxx += x[i] * x[i]; sxy += x[i] * y[i]; }
+  var k = (n * sxy - sx * sy) / (n * sxx - sx * sx); return [k, (sy - k * sx) / n];
+}
+// 傾き（勾配）＋ うねり（形状）。傾きと形状の大きさを許容値いっぱいにする
+function slopeWave(n, H, F, Ftot, cycles, phase) {
+  var u = [], e = [], i;
+  for (i = 0; i <= n; i++) { u.push(i / n); e.push(F / 2 * Math.sin(2 * Math.PI * cycles * u[i] + phase)); }
+  var k0 = lsq(u, e)[0];                          // うねりが持ち込む傾きを差し引き、測った傾きを H にする
+  e = e.map(function (v, i) { return v + (H - k0) * (u[i] - 0.5); });
+  var sc = Math.min(1, Ftot / range(e));          // 全体（山と谷の差）が全体の許容値を超えないよう縮める
+  e = e.map(function (v) { return v * sc; });
+  var L = lsq(u, e), res = e.map(function (v, i) { return v - (L[0] * u[i] + L[1]); });
+  return { u: u, e: e, total: range(e), slope: L[0], form: range(res) };
+}
+
+// 1. 歯形：歯元（インボリュートの始まり）→ 歯先 を転がり長さで測る
+var L0 = Math.sqrt(G.r_form * G.r_form - G.rb * G.rb), L1 = Math.sqrt(G.ra * G.ra - G.rb * G.rb);
+var PROF = slopeWave(200, TOL.fHa, TOL.ffa, TOL.Fa, 1.3, 0.5);
+// 2. 歯すじ：歯幅 0 → b
+var HELIX = slopeWave(200, TOL.ffb, TOL.ffb, TOL.Fb, 1.0, -0.6);
+// 3. ピッチ：歯ごとの位置ずれ。乱数（シード固定）で作り、単一ピッチの最大を許容値いっぱいにする
+var PITCH = (function () {
+  var r = rng(7), f = [], i, m = 0;
+  for (i = 0; i < G.z; i++) f.push(r() * 2 - 1);
+  var mean = f.reduce(function (a, b) { return a + b; }, 0) / G.z;
+  f = f.map(function (v) { return v - mean; });               // 1 周すると元に戻る（合計 0）
+  f.forEach(function (v) { m = Math.max(m, Math.abs(v)); });
+  f = f.map(function (v) { return v / m * TOL.fpt; });
+  var F = [0]; for (i = 1; i < G.z; i++) F.push(F[i - 1] + f[i]); // 1 番歯を基準にした位置ずれ（累積）
+  return { fpt: f, F: F, fptMax: TOL.fpt, Fp: range(F) };
+})();
+// 4. 偏心：歯車の中心が回転軸から e ずれる。歯溝に入れた球の高さが 1 回転で 1 周期ゆれる
+var RUN = (function () {
+  var e = TOL.Fr / 2, r = [];
+  for (var k = 0; k < G.z; k++) r.push(e * Math.cos(2 * Math.PI * k / G.z));
+  return { e: e, r: r, Fr: range(r) };
+})();
+// 5. 粗さ：歯面に沿って 4 mm なぞる。工具の送り目（周期 0.25 mm）＋細かい乱れ。Ra を 3.2 µm に合わせる
+var ROUGH = (function () {
+  // なぞる長さ = インボリュート歯面の長さ（= (L1² − L0²) / 2rb）
+  var n = 800, len = (L1 * L1 - L0 * L0) / (2 * G.rb), r = rng(11), y = [], i, noise = 0;
+  for (i = 0; i <= n; i++) {
+    var s = i / n * len; noise = 0.75 * noise + 0.25 * (r() * 2 - 1);
+    y.push(Math.abs(Math.sin(Math.PI * s / 0.25)) * 2 - 1.27 + 1.6 * noise);
+  }
+  var mean = y.reduce(function (a, b) { return a + b; }, 0) / y.length;
+  y = y.map(function (v) { return v - mean; });
+  var ra = y.reduce(function (a, b) { return a + Math.abs(b); }, 0) / y.length;
+  y = y.map(function (v) { return v / ra * RA; });
+  return { y: y, len: len, Ra: y.reduce(function (a, b) { return a + Math.abs(b); }, 0) / y.length, Rz: range(y) };
+})();
+
+
+// 6. うねり：歯面に沿った、粗さより波長の長い波（波長 0.6〜1.2 mm）。規格の許容値は無いので、最大高さ 6 µm を想定
+var WAVE = (function () {
+  var n = 800, len = ROUGH.len, y = [], i;
+  for (i = 0; i <= n; i++) { var s = i / n * len; y.push(Math.sin(2 * Math.PI * s / 1.15 + 0.4) + 0.45 * Math.sin(2 * Math.PI * s / 0.62 + 1.3)); }
+  var sc = 6 / range(y); y = y.map(function (v) { return v * sc; });
+  return { y: y, len: len, Wt: range(y) };
+})();
+  // ---------- 共通 ----------
+  var VW = 340, VH = 520;
+  var T = {};
+  function readTokens() {
+    var s = getComputedStyle(document.documentElement);
+    ['bg', 'die', 'ink', 'muted', 'line', 'ideal', 'err', 'warn'].forEach(function (k) {
+      T[k] = s.getPropertyValue('--' + k).trim();
+    });
+  }
+  function fit(c) {
+    var r = c.getBoundingClientRect();
+    var dp = Math.min(window.devicePixelRatio || 1, 3);
+    var w = Math.max(1, Math.round(r.width * dp)), h = Math.max(1, Math.round(r.height * dp));
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    var ctx = c.getContext('2d');
+    var s = w / VW;
+    ctx.setTransform(s, 0, 0, s, 0, 0);
+    ctx.clearRect(0, 0, VW, VH);
+    return ctx;
+  }
+  function c01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+  function ease(p) { p = c01(p); return p * p * (3 - 2 * p); }
+  function rr(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function box(ctx, cx, cy, w, h, o) {
+    o = o || {};
+    rr(ctx, cx - w / 2, cy - h / 2, w, h, o.r == null ? 4 : o.r);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = o.fill || T.bg; ctx.fill();
+    if (o.glow) { ctx.globalAlpha = o.glow; ctx.fillStyle = o.color; ctx.fill(); ctx.globalAlpha = 1; }
+    ctx.lineWidth = o.lw || 1;
+    ctx.setLineDash(o.dash || []);
+    ctx.strokeStyle = o.stroke || T.line; ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  function txt(ctx, s, x, y, o) {
+    o = o || {};
+    ctx.globalAlpha = o.alpha == null ? 1 : o.alpha;
+    ctx.font = (o.weight || 700) + ' ' + (o.size || 14) + 'px ' + (o.jp ? '"Zen Kaku Gothic New", sans-serif' : '"M PLUS 1 Code", ui-monospace, monospace');
+    ctx.textAlign = o.align || 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = o.color || T.ink;
+    ctx.fillText(String(s), x, y);
+    ctx.globalAlpha = 1;
+  }
+  function fx(v, n) { var s = v.toFixed(n); return /^-0\.0+$/.test(s) ? s.slice(1) : s; }
+  function poly(ctx, pts) { ctx.beginPath(); pts.forEach(function (p, i) { if (i) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]); }); }
+
+  // ---------- 歯車の形（helical_gear.py の創成歯形から） ----------
+  // 歯の右側歯面（歯底→歯先）。歯は +X 軸が中心。
+  var FL = G.flank;
+  var Lr = FL.map(function (p) { var r = Math.hypot(p[0], p[1]); return r > G.rb ? Math.sqrt(r * r - G.rb * G.rb) : 0; });
+  var FN = FL.map(function (p, i) {           // 歯の外向きの法線
+    var a = FL[Math.max(0, i - 1)], b = FL[Math.min(FL.length - 1, i + 1)];
+    var tx = b[0] - a[0], ty = b[1] - a[1], l = Math.hypot(tx, ty), nx = ty / l, ny = -tx / l;
+    return ny < 0 ? [nx, ny] : [-nx, -ny];
+  });
+  function rot(p, a) { var c = Math.cos(a), s = Math.sin(a); return [p[0] * c - p[1] * s, p[0] * s + p[1] * c]; }
+  function interp(xs, ys, x) {               // xs は単調増加
+    if (x <= xs[0]) return ys[0];
+    if (x >= xs[xs.length - 1]) return ys[ys.length - 1];
+    var lo = 0, hi = xs.length - 1;
+    while (hi - lo > 1) { var m = (lo + hi) >> 1; if (xs[m] <= x) lo = m; else hi = m; }
+    var f = (x - xs[lo]) / (xs[hi] - xs[lo]); return ys[lo] + f * (ys[hi] - ys[lo]);
+  }
+  // 歯 1 枚の輪郭（右歯面 → 歯先 → 左歯面 → 次の歯までの歯底）。right は右歯面の点列（省略で理想形）
+  function toothPts(right) {
+    var R = right || FL, out = R.slice(), i, n = FL.length;
+    var e = R[R.length - 1], th = Math.atan2(e[1], e[0]), thL = -Math.atan2(FL[n - 1][1], FL[n - 1][0]);
+    for (i = 1; i < 8; i++) { var a = th + (thL - th) * i / 8; out.push([G.ra * Math.cos(a), G.ra * Math.sin(a)]); }
+    for (i = n - 1; i >= 0; i--) out.push([FL[i][0], -FL[i][1]]);
+    var a0 = Math.atan2(-FL[0][1], FL[0][0]), a1 = 2 * Math.PI / G.z + Math.atan2(FL[0][1], FL[0][0]);
+    for (i = 1; i < 6; i++) { var a2 = a0 + (a1 - a0) * i / 6; out.push([G.rf * Math.cos(a2), G.rf * Math.sin(a2)]); }
+    return out;
+  }
+  // 右歯面の点を法線方向に dev(i) [mm] 動かした点列
+  function flankWith(dev) { return FL.map(function (p, i) { var d = dev(i); return [p[0] + FN[i][0] * d, p[1] + FN[i][1] * d]; }); }
+  // 歯面上の位置（インボリュートの始まりからの長さ s [mm]）→ 点と法線
+  var RS = FL.map(function (p) { return Math.hypot(p[0], p[1]); });
+  var FLX = FL.map(function (p) { return p[0]; }), FLY = FL.map(function (p) { return p[1]; });
+  var FNX = FN.map(function (p) { return p[0]; }), FNY = FN.map(function (p) { return p[1]; });
+  function flankAt(s) {
+    var L = Math.sqrt(L0 * L0 + 2 * G.rb * s), r = Math.sqrt(L * L + G.rb * G.rb);
+    return { p: [interp(RS, FLX, r), interp(RS, FLY, r)], n: [interp(RS, FNX, r), interp(RS, FNY, r)] };
+  }
+  var TOOTH0 = toothPts(null);
+  // 歯車全体。ang(k) = 歯 k の角度のずれ [rad]
+  function gearPts(rotA, ang, cx, cy) {
+    var out = [];
+    for (var k = 0; k < G.z; k++) {
+      var a = rotA + 2 * Math.PI * k / G.z + (ang ? ang(k) : 0);
+      TOOTH0.forEach(function (p) { var q = rot(p, a); out.push([q[0] + (cx || 0), q[1] + (cy || 0)]); });
+    }
+    return out;
+  }
+
+  // ---------- 進行 ----------
+  // 0.2〜1.4 秒：0 µm の歯車がずれた歯車に変わる ／ 1.6〜8.6 秒：測定子でなぞってチャートを描く ／ そのあと止めて見せる
+  var T_GROW = 0.2, GROW = 1.2, T_SWEEP = 1.6, SWEEP = 7, END = T_SWEEP + SWEEP, PERIOD = END + 2.6;
+
+  // ---------- 描画部品 ----------
+  var YR = 60;                                 // チャートの縦：ページ内の全パネル共通（ページごとのファイルで変えてよい）
+  var CHART_TITLE = '測定チャート（µm、実寸）';
+  var CX0 = 44, CX1 = 316, CY0 = 296, CY1 = 382;
+  function cy(v) { return (CY0 + CY1) / 2 - v / YR * (CY1 - CY0) / 2; }
+  function viewFrame(ctx, title, K) {
+    box(ctx, 170, 132, 316, 240, { r: 8, dash: [5, 3], stroke: T.muted, fill: T.bg });
+    txt(ctx, title, 22, 26, { jp: true, size: 10, weight: 700, color: T.muted, align: 'left' });
+    txt(ctx, '※ ずれを ×' + K + ' で表示', 318, 26, { jp: true, size: 10, weight: 700, color: T.warn, align: 'right' });
+  }
+  function chartFrame(ctx, xl, xr, xmid, effect, t) {
+    box(ctx, 170, 334, 316, 128, { r: 8, dash: [5, 3], stroke: T.muted, fill: T.bg });
+    txt(ctx, CHART_TITLE, 22, 282, { jp: true, size: 10, color: T.muted, align: 'left' });
+    ctx.strokeStyle = T.ideal; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(198, 282); ctx.lineTo(212, 282); ctx.stroke();
+    txt(ctx, '真値', 215, 282, { jp: true, size: 10, weight: 700, color: T.muted, align: 'left' });
+    ctx.strokeStyle = T.err; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(250, 282); ctx.lineTo(264, 282); ctx.stroke();
+    txt(ctx, '誤差あり', 267, 282, { jp: true, size: 10, weight: 700, color: T.muted, align: 'left' });
+    ctx.strokeStyle = T.line; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+    [-YR / 2, YR / 2].forEach(function (v) { ctx.beginPath(); ctx.moveTo(CX0, cy(v)); ctx.lineTo(CX1, cy(v)); ctx.stroke(); });
+    ctx.setLineDash([]);
+    ctx.strokeStyle = T.muted; ctx.beginPath(); ctx.moveTo(CX0, CY0); ctx.lineTo(CX0, CY1); ctx.stroke();
+    [YR, YR / 2, 0, -YR / 2, -YR].forEach(function (v) { txt(ctx, (v > 0 ? '+' : '') + (+v.toFixed(1)), CX0 - 4, cy(v), { size: 9, weight: 600, color: T.muted, align: 'right' }); });
+    txt(ctx, xl, CX0, 391, { jp: true, size: 10, weight: 500, color: T.muted, align: 'left' });
+    txt(ctx, xmid, 180, 391, { jp: true, size: 10, weight: 500, color: T.muted });
+    txt(ctx, xr, CX1, 391, { jp: true, size: 10, weight: 500, color: T.muted, align: 'right' });
+    // 0 µm の線（理想の歯車はどこを測っても 0）
+    ctx.strokeStyle = T.ideal; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(CX0, cy(0)); ctx.lineTo(CX1, cy(0)); ctx.stroke();
+    if (t >= END) {                            // 線と重なっても読めるよう地の色を敷く
+      ctx.font = '700 13px "Zen Kaku Gothic New", sans-serif';
+      var ew = ctx.measureText(effect).width;
+      ctx.globalAlpha = 0.88; ctx.fillStyle = T.bg; ctx.fillRect(CX0 + 3, CY0 - 3, ew + 6, 18); ctx.globalAlpha = 1;
+      txt(ctx, effect, CX0 + 6, CY0 + 6, { jp: true, size: 13, color: T.err, align: 'left' });
+    }
+  }
+  // 連続な誤差の線（u: 0〜1、e: µm）を cur 番目まで描く。0 との差を赤く塗る
+  function chartLine(ctx, u, e, cur) {
+    var X = function (i) { return CX0 + u[i] * (CX1 - CX0); }, i;
+    ctx.beginPath(); ctx.moveTo(X(0), cy(0));
+    for (i = 0; i <= cur; i++) ctx.lineTo(X(i), cy(e[i]));
+    ctx.lineTo(X(cur), cy(0)); ctx.closePath();
+    ctx.globalAlpha = 0.25; ctx.fillStyle = T.warn; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.strokeStyle = T.err; ctx.lineWidth = 2.2; ctx.lineJoin = 'round';
+    ctx.beginPath(); for (i = 0; i <= cur; i++) { if (i) ctx.lineTo(X(i), cy(e[i])); else ctx.moveTo(X(i), cy(e[i])); } ctx.stroke();
+    ctx.strokeStyle = T.ideal; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(CX0, cy(0)); ctx.lineTo(X(cur), cy(0)); ctx.stroke();
+    ctx.beginPath(); ctx.arc(X(cur), cy(e[cur]), 3.2, 0, 2 * Math.PI); ctx.fillStyle = T.err; ctx.fill();
+  }
+  // 数字の箱：rows = [{ label, val（null なら —）}]、note = 下の一行
+  function numbers(ctx, rows, note) {
+    box(ctx, 170, 462, 316, 96, { r: 10, stroke: T.err, lw: 1.5, fill: T.die });
+    txt(ctx, '真値', 178, 424, { jp: true, size: 10, weight: 700, color: T.muted });
+    txt(ctx, '誤差あり', 268, 424, { jp: true, size: 10, weight: 700, color: T.muted });
+    rows.forEach(function (r, j) {
+      var y = 442 + j * 27;
+      txt(ctx, r.label, 22, y, { jp: true, size: 12, color: T.ink, align: 'left' });
+      box(ctx, 178, y, 54, 21, { stroke: T.ideal, lw: 1.3 });
+      txt(ctx, r.ideal == null ? '0.0' : r.ideal, 178, y + 0.5, { size: r.ideal != null && String(r.ideal).length > 6 ? 10 : 12, color: T.ideal });
+      txt(ctx, '→', 223, y, { jp: true, size: 12, color: T.muted });
+      box(ctx, 268, y, 84, 21, { stroke: T.err, lw: 1.3 });
+      var vs = r.val == null ? '—' : (typeof r.val === 'string' ? r.val : fx(r.val, r.d == null ? 1 : r.d) + ' ' + (r.unit || 'µm'));
+      txt(ctx, vs, 268, y + 0.5, { size: vs.length > 10 ? 10 : 12, color: r.val == null ? T.muted : T.warn });
+    });
+    txt(ctx, note, 22, 500, { jp: true, size: 10, weight: 500, color: T.muted, align: 'left' });
+  }
+  // 地の色の札つきの文字（線と重なっても読める）
+  function tag(ctx, s, x, y, o) {
+    o = o || {};
+    ctx.font = '700 ' + (o.size || 10) + 'px "M PLUS 1 Code", ui-monospace, monospace';
+    var w = ctx.measureText(String(s)).width + 6, al = o.align || 'center';
+    var x0 = al === 'left' ? x - 3 : al === 'right' ? x - w + 3 : x - w / 2;
+    ctx.globalAlpha = 0.9; ctx.fillStyle = T.bg; ctx.fillRect(x0, y - 7, w, 14); ctx.globalAlpha = 1;
+    txt(ctx, s, x, y, o);
+  }
+  function prog(t) { return c01((t - T_SWEEP) / SWEEP); }
+  function grow(t) { return ease((t - T_GROW) / GROW); }
+  function maxAbs(a) { return a.reduce(function (m, v) { return Math.max(m, Math.abs(v)); }, 0); }
+
+  // ---------- 歯 1 枚の拡大図（歯形と粗さで共用） ----------
+  var TS = 36, TCX = 170, TBASE = 60;          // 1 mm = 36 px。歯先円が y = 60 付近
+  function tScreen(p) { return [TCX - p[1] * TS, TBASE + (G.ra - p[0]) * TS + 6]; }
+  function drawTooth(ctx, right, probe, probeName) {
+    ctx.save(); rr(ctx, 13, 33, 314, 218, 6); ctx.clip();
+    [-1, 0, 1].forEach(function (k) {         // 隣の歯も少し見せる
+      var a = 2 * Math.PI * k / G.z;
+      var act = toothPts(k === 0 ? right : null).map(function (p) { return tScreen(rot(p, a)); });
+      var ide = TOOTH0.map(function (p) { return tScreen(rot(p, a)); });
+      poly(ctx, act); ctx.lineTo(act[act.length - 1][0], 260); ctx.lineTo(act[0][0], 260);
+      ctx.globalAlpha = 0.16; ctx.fillStyle = T.err; ctx.fill(); ctx.globalAlpha = 1;
+      poly(ctx, act); ctx.strokeStyle = T.err; ctx.lineWidth = k === 0 && right && right.length > 200 ? 1.6 : 2.4; ctx.stroke();
+      poly(ctx, ide); ctx.strokeStyle = T.ideal; ctx.lineWidth = 1.3; ctx.stroke();
+    });
+    if (probe) {                               // probe = [点, 法線]（mm）
+      var c = tScreen([probe[0][0] + probe[1][0] * 0.13, probe[0][1] + probe[1][1] * 0.13]);
+      ctx.strokeStyle = T.ink; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(c[0], c[1]); ctx.lineTo(c[0] + 34, c[1] - 22); ctx.stroke();
+      ctx.beginPath(); ctx.arc(c[0], c[1], probeName === '触針' ? 2.2 : 0.13 * TS, 0, 2 * Math.PI); ctx.fillStyle = T.ink; ctx.fill();
+      txt(ctx, probeName, Math.min(c[0] + 36, 282), Math.max(c[1] - 30, 46), { jp: true, size: 9, color: T.ink, align: 'left' });
+    }
+    ctx.restore();
+  }
+  var I_FORM = FL.findIndex(function (p) { return Math.hypot(p[0], p[1]) >= G.r_form - 1e-9; });
+
+  // ---------- かみ合いの計算（線と線の交点から、歯が重ならない位置を求める） ----------
+  // 歯車は歯ごとの折れ線（歯面＋歯先）で表す。歯車 B を中心のまわりに回すと、B の各頂点は円弧を描く。
+  // その円弧と A の線分の交点（と、A の頂点が B に対して描く円弧と B の線分の交点）のうち、
+  // 一番近いものが「当たるまでの回転角」。これを使って
+  //   片歯面：駆動側の歯面が当たる角度（＝マスタの回転のおくれ・すすみ）
+  //   両歯面：両側の歯面が同時に当たるまで中心距離を縮めた位置
+  //   バックラッシ：駆動側が当たる角度と反対側が当たる角度の差
+  // を求める。描く歯車もこの計算と同じ折れ線なので、絵の上でも重ならない。
+  var MZ = G.z, MP = 2 * Math.PI / G.z;
+  // 右歯面（歯底→歯先、y<0）。すみ肉は helical_gear.py の創成歯形、インボリュートの部分は式から 240 点で細かく作る
+  // （折れ線の弦の誤差を 0.01 µm 程度に抑えるため）
+  var MFL = (function () {
+    var inv = function (x) { return Math.tan(x) - x; }, at = G.at * Math.PI / 180, out = [], i;
+    var psi0 = Math.PI / (2 * G.z) + inv(at);
+    G.flank.forEach(function (p) { if (Math.hypot(p[0], p[1]) < G.r_form - 1e-9) out.push(p); });
+    for (i = 0; i <= 240; i++) {
+      var r = G.r_form + (G.ra - G.r_form) * i / 240, ps = psi0 - inv(Math.acos(G.rb / r));
+      out.push([r * Math.cos(-ps), r * Math.sin(-ps)]);
+    }
+    return out;
+  })();
+  var MFN = MFL.map(function (p, i) {                    // 外向きの法線
+    var a = MFL[Math.max(0, i - 1)], b = MFL[Math.min(MFL.length - 1, i + 1)];
+    var tx = b[0] - a[0], ty = b[1] - a[1], l = Math.hypot(tx, ty), nx = ty / l, ny = -tx / l;
+    return ny < 0 ? [nx, ny] : [-nx, -ny];
+  });
+  var MLR = MFL.map(function (p) { var r = Math.hypot(p[0], p[1]); return r > G.rb ? Math.sqrt(r * r - G.rb * G.rb) : 0; });
+  var M_IFORM = MFL.findIndex(function (p) { return Math.hypot(p[0], p[1]) >= G.r_form - 1e-9; });
+  var M_L0 = Math.sqrt(G.r_form * G.r_form - G.rb * G.rb), M_L1 = Math.sqrt(G.ra * G.ra - G.rb * G.rb);
+
+  // 歯車を作る。o.K：ずれの倍率、o.prof：歯形のずれ [µm]（u 0〜1 → 関数、両歯面・全歯）、
+  // o.pitch：歯 k の位置のずれ [µm]（配列）、o.thin：歯 k の片側の歯面を内側へ動かす量 [µm]（配列、正で薄く）
+  function makeGear(o) {
+    o = o || {};
+    var K = o.K || 0, teeth = [], k, i;
+    var dev = function (i) {
+      if (!o.prof) return 0;
+      var e0 = o.prof(0);
+      if (i < M_IFORM) return K * e0 * i / M_IFORM / 1000;
+      return K * o.prof((MLR[i] - M_L0) / (M_L1 - M_L0)) / 1000;
+    };
+    var base = MFL.map(function (p, i) { return dev(i); });
+    for (k = 0; k < MZ; k++) {
+      var th = o.thin ? K * o.thin[k] / 1000 : 0;
+      // 薄くする量は、すみ肉の部分では歯底へ向かって 0 に戻す（歯底円とつながるように）
+      var R = MFL.map(function (p, i) { var d = base[i] - th * Math.min(1, i / M_IFORM); return [p[0] + MFN[i][0] * d, p[1] + MFN[i][1] * d]; });
+      var L = R.map(function (p) { return [p[0], -p[1]]; });
+      // 歯先の円弧を少し足す（歯先の角で当たるときのため）
+      var eR = R[R.length - 1], aR = Math.atan2(eR[1], eR[0]), tipR = [], tipL = [];
+      for (i = 1; i <= 4; i++) { var a = aR * (1 - i / 4); tipR.push([G.ra * Math.cos(a), G.ra * Math.sin(a)]); }
+      tipR.forEach(function (p) { tipL.push([p[0], -p[1]]); });
+      teeth.push({ R: R.concat(tipR), L: L.concat(tipL), off: o.pitch ? K * o.pitch[k] / 1000 / G.rp : 0, Rf: R, Lf: L });
+    }
+    return { teeth: teeth };
+  }
+  // 描く用の輪郭（歯面＋歯先＋歯底）。gear の姿勢 pose = { c:[x,y], th }
+  function gearOutline(gear, pose) {
+    var out = [], c = pose.c;
+    gear.teeth.forEach(function (tk, k) {
+      var a = pose.th + MP * k + tk.off, ca = Math.cos(a), sa = Math.sin(a), i, pts = [];
+      tk.Rf.forEach(function (p) { pts.push(p); });
+      var eR = tk.Rf[tk.Rf.length - 1], eL = tk.Lf[tk.Lf.length - 1], a0 = Math.atan2(eR[1], eR[0]), a1 = Math.atan2(eL[1], eL[0]);
+      for (i = 1; i < 8; i++) { var b = a0 + (a1 - a0) * i / 8; pts.push([G.ra * Math.cos(b), G.ra * Math.sin(b)]); }
+      for (i = tk.Lf.length - 1; i >= 0; i--) pts.push(tk.Lf[i]);
+      // 次の歯の右歯面の始まりまで歯底円（次の歯のずれも考える）
+      var nx = gear.teeth[(k + 1) % MZ], dOff = MP + nx.off - tk.off, s0 = tk.Lf[0], s1 = nx.Rf[0];
+      var b0 = Math.atan2(s0[1], s0[0]), b1 = dOff + Math.atan2(s1[1], s1[0]);
+      var q0 = Math.hypot(s0[0], s0[1]), q1 = Math.hypot(s1[0], s1[1]);
+      for (i = 1; i < 6; i++) { var b2 = b0 + (b1 - b0) * i / 6, rq = q0 + (q1 - q0) * i / 6; pts.push([rq * Math.cos(b2), rq * Math.sin(b2)]); }
+      pts.forEach(function (p) { out.push([c[0] + p[0] * ca - p[1] * sa, c[1] + p[0] * sa + p[1] * ca]); });
+    });
+    return out;
+  }
+  // かみ合い部分の近くの歯の、片側の歯面（世界座標の折れ線の配列）
+  function sideLines(gear, pose, side, toward) {
+    var c = pose.c, lines = [];
+    for (var k = 0; k < MZ; k++) {
+      var tk = gear.teeth[k], a = pose.th + MP * k + tk.off;
+      var d = Math.atan2(Math.sin(a - toward), Math.cos(a - toward));
+      if (Math.abs(d) > 1.7 * MP) continue;
+      var ca = Math.cos(a), sa = Math.sin(a);
+      lines.push(tk[side].map(function (p) { return [c[0] + p[0] * ca - p[1] * sa, c[1] + p[0] * sa + p[1] * ca]; }));
+    }
+    return lines;
+  }
+  // 中心 cB のまわりに B を dir 向きに回したとき、A に当たるまでの角度（phiMax まで。当たらなければ Infinity）
+  function hitAngle(Alines, Blines, cB, dir, phiMax) {
+    var best = Infinity;
+    function segs(lines) {
+      var s = [];
+      lines.forEach(function (ln) {
+        for (var i = 0; i + 1 < ln.length; i++) {
+          var P = ln[i], Q = ln[i + 1], px = P[0] - cB[0], py = P[1] - cB[1], qx = Q[0] - cB[0], qy = Q[1] - cB[1];
+          var dx = qx - px, dy = qy - py, l2 = dx * dx + dy * dy, t = l2 > 0 ? Math.max(0, Math.min(1, -(px * dx + py * dy) / l2)) : 0;
+          var rmin = Math.hypot(px + t * dx, py + t * dy), rmax = Math.max(Math.hypot(px, py), Math.hypot(qx, qy));
+          s.push([px, py, dx, dy, rmin, rmax]);
+        }
+      });
+      return s;
+    }
+    // 頂点は 1 つおき（頂点の間で当たる取りこぼしは 0.03 µm 以下。線分は全部使う）
+    function verts(lines) { var v = []; lines.forEach(function (ln) { ln.forEach(function (p, i) { if (i % 2 === 0 || i === ln.length - 1) v.push([p[0] - cB[0], p[1] - cB[1]]); }); }); return v; }
+    // 半径で分けた入れ物（0.1 mm ごと）で、交わりうる線分だけを調べる
+    function binned(s) {
+      var bins = [];
+      s.forEach(function (g) { for (var b = Math.floor(g[4] * 10); b <= Math.floor(g[5] * 10); b++) (bins[b] || (bins[b] = [])).push(g); });
+      return bins;
+    }
+    function sweep(vs, bins, sgn) {          // 頂点が sgn 向きに回ったとき最初に交わる角度
+      vs.forEach(function (v) {
+        var r = Math.hypot(v[0], v[1]), list = bins[Math.floor(r * 10)];
+        if (!list) return;
+        var a0 = Math.atan2(v[1], v[0]);
+        for (var j = 0; j < list.length; j++) {
+          var g = list[j];
+          if (r < g[4] - 1e-12 || r > g[5] + 1e-12) continue;
+          var A = g[2] * g[2] + g[3] * g[3], B = 2 * (g[0] * g[2] + g[1] * g[3]), C = g[0] * g[0] + g[1] * g[1] - r * r;
+          var D = B * B - 4 * A * C; if (D < 0) continue;
+          var sq = Math.sqrt(D);
+          [(-B - sq) / (2 * A), (-B + sq) / (2 * A)].forEach(function (t) {
+            if (t < -1e-12 || t > 1 + 1e-12) return;
+            var x = g[0] + t * g[2], y = g[1] + t * g[3];
+            var ph = sgn * (Math.atan2(y, x) - a0);
+            ph = ((ph % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+            if (ph <= phiMax && ph < best) best = ph;
+          });
+        }
+      });
+    }
+    var sA = segs(Alines), sB = segs(Blines);
+    sweep(verts(Blines), binned(sA), dir);   // B の頂点が回って A の線分に当たる
+    sweep(verts(Alines), binned(sB), -dir);  // B から見ると A の頂点は逆向きに回る
+    return best;
+  }
+  // A（姿勢 pA）に対して、中心 cB の B が side 側の歯面で当たる回転角。
+  // side 'L'：A が回る向き（反時計回り）に押す側。B は反時計回りに回すとすき間が閉じる。'R' はその逆。
+  // phiNom は B の設計どおりの角度。そこから半ピッチ弱ずらした所から回して当てる
+  function contactAngle(A, pA, B, cB, phiNom, side) {
+    var dir = side === 'L' ? 1 : -1, start = phiNom - dir * 0.45 * MP;
+    var towardA = Math.atan2(pA.c[1] - cB[1], pA.c[0] - cB[0]), towardB = Math.atan2(cB[1] - pA.c[1], cB[0] - pA.c[0]);
+    var Al = sideLines(A, pA, side, towardB), Bl = sideLines(B, { c: cB, th: start }, side, towardA);
+    var h = Math.min(hitAngle(Al, Bl, cB, dir, 0.95 * MP), 0.95 * MP);   // 当たらなければ探す範囲の端
+    return start + dir * h;
+  }
+  // B の設計どおりの角度（A が th 回ったとき。同じ歯数どうし）
+  function phiNominal(th) { return Math.PI + MP / 2 - th; }
+  // 両側の歯面が同時に当たる中心距離（ばねで押し付けたとき）。
+  // gap(a)（左右の当たり角の差、正ならすき間）は a とともに増える。a0 の近くで符号の変わる区間をはさみ、
+  // 割線と二分を組み合わせた方法（イリノイ法）で gap = 0 の a を求める
+  function tightCenter(A, pA, B, th, a0) {
+    function gap(a) {
+      var cB = [a, 0], pn = phiNominal(th);
+      return contactAngle(A, pA, B, cB, pn, 'L') - contactAngle(A, pA, B, cB, pn, 'R');
+    }
+    var step = 0.02, lo = a0, flo = gap(lo), hi, fhi, n = 0;
+    if (flo > 0) { hi = lo; fhi = flo; do { lo = hi - step; flo = gap(lo); if (flo > 0) { hi = lo; fhi = flo; } step *= 2; } while (flo > 0 && ++n < 20); }
+    else { do { hi = lo + step; fhi = gap(hi); if (fhi < 0) { lo = hi; flo = fhi; } step *= 2; } while (fhi < 0 && ++n < 20); }
+    var side = 0, x = lo;
+    for (var it = 0; it < 60; it++) {
+      x = (lo * fhi - hi * flo) / (fhi - flo);
+      var fx_ = gap(x);
+      if (Math.abs(fx_) < 1e-10 || hi - lo < 1e-7) break;
+      if (fx_ > 0) { hi = x; fhi = fx_; if (side === 1) flo /= 2; side = 1; }
+      else { lo = x; flo = fx_; if (side === -1) fhi /= 2; side = -1; }
+    }
+    return x;
+  }
+  var PANELS = {}, ARIA = {}, LEAD = '', POINTS = [];
+  var ORDER = ["ca", "pd", "pb"];
+  // ---------- 計算 ----------
+  // 同じ歯車 2 枚（諸元 G、設計のバックラッシ 0）をかみ合わせる
+  var A0 = 2 * G.rp;                         // 真値の中心距離 [mm]
+  var DA = 0.050;                            // 中心距離の誤差：+50 µm を想定
+  var PBT = Math.PI * G.mt * Math.cos(AT);   // 正面の法線ピッチ
+  function epsA(a) {                         // かみ合い率（同じ歯車どうし）
+    var aw = Math.sqrt(a * a - 4 * G.rb * G.rb);   // a·sin αw
+    return (2 * Math.sqrt(G.ra * G.ra - G.rb * G.rb) - aw) / PBT;
+  }
+  var AWT = Math.acos(A0 * Math.cos(AT) / (A0 + DA));        // 離したときのかみ合い圧力角
+  var JT = 2 * DA * Math.tan(AWT) * 1000;                     // 円周方向のバックラッシ [µm]
+  var BB = Math.atan(Math.tan(BETA) * Math.cos(AT));          // 基礎円筒ねじれ角
+  var JN = JT * Math.cos(AWT) * Math.cos(BB);                 // 法線方向のバックラッシ [µm]
+  var EA0 = epsA(A0), EA1 = epsA(A0 + DA);
+  // バックラッシをかみ合いのプログラム（_mesh.js：線と線の交点から歯が重ならない位置を求める）で求める。
+  // 歯車1 を回し、歯車2 を駆動側の歯面が当たる角度と反対側が当たる角度まで回して、その差を基準円上の長さにする
+  var IG = makeGear({}), NB = 60, BL = [];
+  for (var ib = 0; ib <= NB; ib++) {
+    var thb = (2 * Math.PI / 6) * ib / NB, pb = { c: [0, 0], th: thb }, pnb = phiNominal(thb);
+    BL.push((contactAngle(IG, pb, IG, [A0 + DA, 0], pnb, 'L') - contactAngle(IG, pb, IG, [A0 + DA, 0], pnb, 'R')) * G.rp * 1000);
+  }
+  var JT_FORMULA = JT;                                        // 近似式 2Δa·tanαwt（確かめ用）
+  JT = BL.reduce(function (p, q) { return p + q; }, 0) / BL.length;
+  JN = JT * Math.cos(AWT) * Math.cos(BB);
+  // 軸の平行度：ISO/TR 10064-3 の推奨値（目安）。L = 軸受スパン 60 mm を想定
+  var LSPAN = 60;
+  var FSB = 0.5 * (LSPAN / G.b) * TOL.Fb;    // ねじれ方向 fΣβ [µm]（軸受スパン L あたり）
+  var FSD = 2 * FSB;                          // 同一平面内 fΣδ [µm]
+  // 歯幅方向の歯面のすき間（作用面内）。同一平面内の傾きは中心距離の変化 → sin αwt 倍、
+  // ねじれの傾きは円周方向のずれ → cos αwt 倍で作用面に効く
+  var KD = FSD / LSPAN * Math.sin(AT), KB = FSB / LSPAN * Math.cos(AT);   // [µm/mm]
+  var ELASTIC = 5;                            // 荷重で歯が縮んで埋まるすき間：5 µm を想定
+  function gapLine(k) { var u = [], e = [], n = 200; for (var i = 0; i <= n; i++) { u.push(i / n); e.push(k * G.b * i / n); } return { u: u, e: e }; }
+  var GD = gapLine(KD), GB = gapLine(KB);
+  var CD = Math.min(G.b, ELASTIC / KD), CB = Math.min(G.b, ELASTIC / KB);  // 当たり幅 [mm]
+  YR = Math.ceil(Math.max(DA * 1000, KD * G.b, KB * G.b) * 1.15 / 10) * 10;
+  function CHECK() {
+    return { A0: A0, JT: JT, JT_range: range(BL), JT_formula: JT_FORMULA, JN: JN, EA0: EA0, EA1: EA1, FSB: FSB, FSD: FSD,
+             gapD: KD * G.b, gapB: KB * G.b, contactD: CD, contactB: CB, YR: YR };
+  }
+  // ---------- 計算ここまで ----------
+
+  var f1 = function (v) { return fx(v, 1); };
+
+  // ----- 1. 中心距離の誤差：かみ合い部分を拡大。右の歯車が離れて、歯の両側にすき間が開く -----
+  PANELS.ca = function (ctx, t) {
+    var K = 50, g = grow(t), u = prog(t), S = 9, MX = 170, MY = 140;
+    var th = 2 * Math.PI * u / 6;                       // 1/6 回転ぶん回して見せる
+    var aV = A0 + K * g * DA;                           // 絵の中心距離（ずれ ×50）
+    var scr = function (p) { return [MX + (p[0] - A0 / 2) * S, MY - p[1] * S]; };
+    viewFrame(ctx, 'かみ合い部分を拡大・左が駆動側', K);
+    ctx.save(); rr(ctx, 13, 33, 314, 218, 6); ctx.clip();
+    var p1 = { c: [0, 0], th: th }, pn = phiNominal(th);
+    // 歯車2 の角度：駆動側の歯面（歯車1 が押す側）がちょうど当たる角度をプログラムで求める
+    var ph2 = contactAngle(IG, p1, IG, [aV, 0], pn, 'L');
+    var g1 = gearOutline(IG, p1).map(scr), g2a = gearOutline(IG, { c: [aV, 0], th: ph2 }).map(scr), g2i = gearOutline(IG, { c: [A0, 0], th: pn }).map(scr);
+    // 歯車1（駆動、位置は変わらない）は灰色、離れた歯車2 は橙
+    poly(ctx, g1); ctx.closePath(); ctx.globalAlpha = 0.18; ctx.fillStyle = T.muted; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.strokeStyle = T.muted; ctx.lineWidth = 1.8; ctx.stroke();
+    poly(ctx, g2a); ctx.closePath(); ctx.globalAlpha = 0.16; ctx.fillStyle = T.err; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.strokeStyle = T.err; ctx.lineWidth = 2.2; ctx.stroke();
+    poly(ctx, g2i); ctx.closePath(); ctx.setLineDash([3, 3]); ctx.strokeStyle = T.ideal; ctx.lineWidth = 1.2; ctx.stroke(); ctx.setLineDash([]);
+    ctx.restore();
+    txt(ctx, '← 歯車1（駆動・灰）の中心へ', 22, 236, { jp: true, size: 9, color: T.muted, align: 'left' });
+    txt(ctx, '歯車2（橙）の中心へ →', 318, 236, { jp: true, size: 9, color: T.err, align: 'right' });
+    tag(ctx, '緑の点線＝設計の中心距離のときの歯車2', 170, 46, { size: 9, color: T.muted });
+    tag(ctx, 'a ' + fx(A0, 3) + ' → ' + fx(A0 + DA * g, 3) + ' mm', 170, 222, { size: 10, color: g > 0.01 ? T.err : T.ink });
+    CHART_TITLE = 'バックラッシ jt（µm、実寸）';
+    chartFrame(ctx, '0°', '60°', '回転角', '', t);
+    CHART_TITLE = '測定チャート（µm、実寸）';
+    var cur = Math.round(u * NB), us = BL.map(function (_, k) { return k / NB; });
+    if (t >= T_SWEEP) chartLine(ctx, us, BL, cur);
+    if (t >= END) tag(ctx, '回っても一定', CX0 + 8, cy(JT / 2), { size: 12, color: T.err, align: 'left' });
+    numbers(ctx, [
+      { label: 'バックラッシ jt', val: t >= T_SWEEP ? BL[cur] : null },
+      { label: 'かみ合い率 εα', ideal: fx(EA0, 3), val: t >= END ? fx(EA1, 3) : null }
+    ], '想定 Δa = +' + f1(DA * 1000) + ' µm   法線方向 jn = ' + f1(JN) + ' µm');
+  };
+
+  // ----- 2・3. 軸の平行度：上に軸と歯車の模式図、下に歯幅方向の歯面のすき間 -----
+  function misPanel(kind) {
+    var F = kind === 'd' ? FSD : FSB, D = kind === 'd' ? GD : GB, KK = kind === 'd' ? KD : KB, CL = kind === 'd' ? CD : CB;
+    return function (ctx, t) {
+      var K = 100, g = grow(t), u = prog(t), cur = Math.round(u * (D.u.length - 1));
+      viewFrame(ctx, kind === 'd' ? '2本の軸を含む面を見る（模式図）' : '中心を結ぶ向きから見る（模式図）', K);
+      // 軸：軸受スパン L = 60 mm を横 260 px に。右の軸受を K 倍ずらす
+      var BX0 = 40, BX1 = 300, PXMM = (BX1 - BX0) / LSPAN;
+      var ang = Math.atan(K * g * F / 1000 * PXMM / (BX1 - BX0));
+      var y1 = kind === 'd' ? 60 : 92, y2 = kind === 'd' ? 108 : 92;
+      var gx0 = BX0 + (LSPAN - G.b) / 2 * PXMM, gw = G.b * PXMM;
+      function shaft(y, a, col, lw, h0, h1, fillA) {
+        var mx = (BX0 + BX1) / 2, hw = (BX1 - BX0) / 2;
+        ctx.save(); ctx.translate(mx, y); ctx.rotate(-a);
+        ctx.fillStyle = col; ctx.globalAlpha = fillA; ctx.fillRect(-gw / 2, -h0, gw, h0 + h1); ctx.globalAlpha = 1;
+        ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.strokeRect(-gw / 2, -h0, gw, h0 + h1);
+        ctx.beginPath(); ctx.moveTo(-hw, 0); ctx.lineTo(hw, 0); ctx.stroke();
+        ctx.fillStyle = col; ctx.fillRect(-hw - 4, -5, 8, 10); ctx.fillRect(hw - 4, -5, 8, 10);
+        ctx.restore();
+      }
+      if (kind === 'd') {
+        shaft(y1, 0, T.ink, 1.5, 10, 24, 0.08);
+        shaft(y2, ang, T.err, 2.2, 24, 10, 0.16);
+        shaft(y2, 0, T.ideal, 1.2, 24, 10, 0);
+        txt(ctx, '歯車1', 24, y1 - 12, { jp: true, size: 9, color: T.muted, align: 'left' });
+        txt(ctx, '歯車2', 24, y2 + 14, { jp: true, size: 9, color: T.muted, align: 'left' });
+      } else {
+        shaft(y1, 0, T.ink, 1.5, 26, 26, 0.08);
+        shaft(y2, ang, T.err, 2.2, 22, 22, 0.16);
+        shaft(y2, 0, T.ideal, 1.2, 22, 22, 0);
+        txt(ctx, '奥：歯車1 ／ 手前：歯車2', 24, 136, { jp: true, size: 9, color: T.muted, align: 'left' });
+      }
+      txt(ctx, '軸受', BX1, 46, { jp: true, size: 9, color: T.muted });
+      // 下：歯面のすき間（作用面内、歯幅方向）
+      var WX0 = 60, WX1 = 280, WY = 196, PXUM = 1.2;
+      txt(ctx, '歯面のすき間（歯幅方向）', 22, 154, { jp: true, size: 10, color: T.muted, align: 'left' });
+      txt(ctx, '※ すき間 1 µm = ' + PXUM + ' px', 318, 154, { jp: true, size: 9, color: T.warn, align: 'right' });
+      var top = [], i, N = 60;
+      for (i = 0; i <= N; i++) top.push([WX0 + (WX1 - WX0) * i / N, WY - g * KK * G.b * i / N * PXUM]);
+      poly(ctx, top.concat([[WX1, WY], [WX0, WY]])); ctx.closePath(); ctx.globalAlpha = 0.25; ctx.fillStyle = T.warn; ctx.fill(); ctx.globalAlpha = 1;
+      ctx.strokeStyle = T.err; ctx.lineWidth = 2.2; poly(ctx, top); ctx.stroke();
+      ctx.strokeStyle = T.ink; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(WX0, WY); ctx.lineTo(WX1, WY); ctx.stroke();
+      ctx.strokeStyle = T.ideal; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(WX0, WY - 1.5); ctx.lineTo(WX1, WY - 1.5); ctx.stroke();
+      txt(ctx, '歯車1の歯面', WX0 - 4, WY + 9, { jp: true, size: 8, color: T.muted, align: 'left' });
+      tag(ctx, '歯車2の歯面', WX0 + (WX1 - WX0) * 0.45, WY - g * KK * G.b * 0.45 * PXUM - 9, { size: 8, color: T.err, align: 'right' });
+      // 当たりの帯：すき間が ELASTIC 以下のところ
+      var cw = (WX1 - WX0) * (1 - g * (1 - CL / G.b));
+      txt(ctx, '当たり', 22, 232, { jp: true, size: 9, color: T.muted, align: 'left' });
+      ctx.strokeStyle = T.ideal; ctx.lineWidth = 1.3; ctx.strokeRect(WX0, 226, WX1 - WX0, 12);
+      ctx.fillStyle = T.err; ctx.globalAlpha = 0.75; ctx.fillRect(WX0, 227, cw, 10); ctx.globalAlpha = 1;
+      tag(ctx, fx(G.b * cw / (WX1 - WX0), 1) + ' mm', WX0 + cw + 4, 232, { size: 9, color: T.err, align: 'left' });
+      CHART_TITLE = '歯面のすき間（µm、実寸）';
+      chartFrame(ctx, '0', G.b + ' mm', '歯幅方向', kind === 'd' ? '当たりが端に寄る' : '当たりが端に寄る（片当たり）', t);
+      if (t >= T_SWEEP) {
+        ctx.strokeStyle = T.muted; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.moveTo(CX0, cy(ELASTIC)); ctx.lineTo(CX1, cy(ELASTIC)); ctx.stroke(); ctx.setLineDash([]);
+        chartLine(ctx, D.u, D.e, cur);
+        tag(ctx, '荷重で埋まる ' + ELASTIC + 'µm（想定）', CX1, cy(ELASTIC) + 9, { size: 8, color: T.muted, align: 'right' });
+      }
+      numbers(ctx, [
+        { label: 'すき間の差（両端）', val: t >= T_SWEEP ? D.e[cur] : null },
+        { label: '当たり幅', ideal: fx(G.b, 1) + ' mm', val: t >= END ? fx(CL, 1) + ' mm' : null }
+      ], 'ISO/TR 10064-3 の目安 ' + (kind === 'd' ? 'fΣδ = ' + f1(FSD) : 'fΣβ = ' + f1(FSB)) + ' µm（L = ' + LSPAN + ' mm）');
+    };
+  }
+  PANELS.pd = misPanel('d'); PANELS.pb = misPanel('b');
+
+  LEAD = '同じ歯車 2 枚をかみ合わせる。歯の位置は、歯の輪郭の線と線の交点から「歯が重ならずに当たる位置」を求めるプログラムで決めた。中心距離の誤差は +' + f1(DA * 1000) + ' µm を想定。軸の平行度は ISO/TR 10064-3 の推奨値（軸受スパン ' + LSPAN + ' mm を想定した目安）。' +
+    '同一平面内の傾きは許される大きさが 2 倍だが、歯面のすき間への効き方は sin αwt 倍と小さい（ねじれは cos αwt 倍）。';
+  POINTS = ['軸の間が ' + f1(DA * 1000) + ' µm 広がると、片側の歯面に<em>すき間</em>（バックラッシ ' + f1(JT) + ' µm）が開く。回っても一定',
+    '軸が傾くと、歯面のすき間が<em>くさび形</em>になり、<em>当たりが端に寄る</em>',
+    '同じ面内の傾きより、<em>ねじれの傾き</em>のほうが当たりを狭くする（' + f1(CD) + ' mm → ' + f1(CB) + ' mm）'];
+  ARIA.ca = '中心距離の誤差：中心距離が ' + fx(A0, 3) + ' mm から ' + f1(DA * 1000) + ' µm 離れても、駆動側の歯面は当たったまま回り、反対側の歯面にすき間が開く。円周方向のバックラッシは 0 から ' + f1(JT) + ' µm、法線方向は ' + f1(JN) + ' µm。かみ合い率は ' + fx(EA0, 3) + ' から ' + fx(EA1, 3) + ' に減る。回っても一定。';
+  ARIA.pd = '軸の平行度（同一平面内）：軸受スパン ' + LSPAN + ' mm で ' + f1(FSD) + ' µm 傾くと、歯幅 ' + G.b + ' mm の両端で歯面のすき間に ' + f1(KD * G.b) + ' µm の差ができる。荷重で 5 µm 埋まると仮定すると、当たり幅は 16 mm から ' + f1(CD) + ' mm に減る。';
+  ARIA.pb = '軸の平行度（ねじれ）：軸受スパン ' + LSPAN + ' mm で ' + f1(FSB) + ' µm 傾くと、歯面のすき間の差は ' + f1(KB * G.b) + ' µm。傾きは同一平面内の半分だが、すき間の差は大きく、当たり幅は ' + f1(CB) + ' mm に減る（片当たり）。';
+
+  // ---------- 文章（数字は上の計算から） ----------
+  document.getElementById('spec').innerHTML =
+    'モジュール ' + G.mn + '・' + G.z + ' 歯・ねじれ角 ' + G.beta + '°・歯幅 ' + G.b + ' mm のはすば歯車。' +
+    '<b class="i">緑＝真値（誤差 0）</b>　<b class="e">橙＝誤差あり</b>　1 µm ＝ 1/1000 mm（髪の毛の太さは約 70 µm）';
+  document.getElementById('points').innerHTML = POINTS.map(function (p) { return '<li>' + p + '</li>'; }).join('');
+  document.getElementById('lead').innerHTML = '歯車の形は helical_gear.py の創成歯形。' + (LEAD || '');
+  var panels = ORDER.map(function (k) {
+    var c = document.getElementById('cv-' + k); c.setAttribute('aria-label', ARIA[k]);
+    return { c: c, draw: PANELS[k] };
+  });
+  var playBtn = document.getElementById('playToggle');
+  var speedBtn = document.getElementById('speedToggle');
+  var SPEEDS = [1, 0.5, 0.25], LABELS = ['速さ 1×', '速さ 0.5×', '速さ 0.25×'];
+  var si = 0;
+  window.ANIM_PERIOD = PERIOD;   // 録画スクリプトが1周の長さを読む
+  var paused = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var time = paused ? END + 0.1 : 0, last = 0, tokenAge = 1;
+  function syncBtn() { playBtn.textContent = paused ? '再生' : '一時停止'; playBtn.setAttribute('aria-pressed', paused ? 'true' : 'false'); }
+  playBtn.addEventListener('click', function () { paused = !paused; syncBtn(); });
+  speedBtn.addEventListener('click', function () { si = (si + 1) % SPEEDS.length; speedBtn.textContent = LABELS[si]; });
+  document.getElementById('restart').addEventListener('click', function () { time = 0; });
+  syncBtn();
+  function loop(now) {
+    var dt = last ? Math.min(0.05, (now - last) / 1000) : 0;
+    last = now;
+    tokenAge += dt || 0.016;
+    if (tokenAge > 0.4) { readTokens(); tokenAge = 0; }
+    if (!paused) time += dt * SPEEDS[si];
+    var t = time % PERIOD;
+    panels.forEach(function (p) { p.draw(fit(p.c), t); });
+    requestAnimationFrame(loop);
+  }
+  readTokens();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
